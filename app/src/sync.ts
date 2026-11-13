@@ -1,7 +1,7 @@
-import NetInfo from "@react-native-community/netinfo";
 import { onlineManager } from "@tanstack/react-query";
 import axios, { type AxiosInstance } from "axios";
 import Constants from "expo-constants";
+import { addNetworkStateListener, getNetworkStateAsync, type NetworkState } from "expo-network";
 import type { SQLiteDatabase } from "expo-sqlite";
 import { Platform } from "react-native";
 import { readInstallationId } from "./installation";
@@ -38,15 +38,18 @@ let snapshot: SyncSnapshot = {
   toggleEnabled: true,
 };
 const listeners = new Set<() => void>();
+let recheckTimer: ReturnType<typeof setInterval> | null = null;
+let recheckInFlight = false;
 
 export function watchNetwork(db: SQLiteDatabase) {
   database = db;
-  onlineManager.setEventListener(() =>
-    NetInfo.addEventListener((state) => {
-      if (typeof state.isConnected !== "boolean") return;
-      setNetConnected(state.isConnected);
-    }),
-  );
+  onlineManager.setEventListener(() => {
+    const subscription = addNetworkStateListener(applyNetworkState);
+    return () => {
+      subscription.remove();
+      stopRecheck();
+    };
+  });
   return () => {
     onlineManager.setEventListener(() => undefined);
   };
@@ -115,14 +118,47 @@ async function drain(db: SQLiteDatabase, installationId: string) {
   }
 }
 
+function applyNetworkState(state: NetworkState) {
+  if (typeof state.isConnected !== "boolean") return;
+  setNetConnected(state.isConnected);
+}
+
 function setNetConnected(connected: boolean) {
   const wasConnected = netKnown && netOnline;
   netKnown = true;
   netOnline = connected;
   if (!connected) manualOnline = false;
   else if (!wasConnected) manualOnline = true;
+  if (connected) stopRecheck();
+  else startRecheck();
   const next = netOnline && manualOnline;
   applyOnline(next, next && !wasConnected);
+}
+
+function startRecheck() {
+  if (recheckTimer) return;
+  recheckTimer = setInterval(() => {
+    void recheckNetwork();
+  }, 1000);
+}
+
+function stopRecheck() {
+  if (!recheckTimer) return;
+  clearInterval(recheckTimer);
+  recheckTimer = null;
+}
+
+async function recheckNetwork() {
+  if (recheckInFlight || netOnline) return;
+  recheckInFlight = true;
+  try {
+    const state = await getNetworkStateAsync();
+    if (!netOnline) applyNetworkState(state);
+  } catch {
+    // The interface can disappear while this read is in flight.
+  } finally {
+    recheckInFlight = false;
+  }
 }
 
 function applyOnline(next: boolean, flush: boolean) {
