@@ -39,9 +39,51 @@ export async function writePartial(
 }
 
 export async function publishFiles(files: StoredFile[]): Promise<void> {
-  for (const file of files) {
-    await rename(file.partialPath, insideUploadDir(file.relativePath));
+  const published: StoredFile[] = [];
+  try {
+    for (const file of files) {
+      const finalPath = insideUploadDir(file.relativePath);
+      try {
+        await rename(finalPath, `${finalPath}.bak`);
+      } catch (error) {
+        if (!isMissingFile(error)) throw error;
+      }
+      try {
+        await rename(file.partialPath, finalPath);
+      } catch (error) {
+        await rename(`${finalPath}.bak`, finalPath).catch((restoreError: unknown) => {
+          if (!isMissingFile(restoreError)) throw restoreError;
+        });
+        throw error;
+      }
+      published.push(file);
+    }
+  } catch (error) {
+    await restoreFiles(published);
+    throw error;
   }
+}
+
+export async function restoreFiles(files: StoredFile[]): Promise<void> {
+  for (const file of [...files].reverse()) {
+    const finalPath = insideUploadDir(file.relativePath);
+    await rm(finalPath, { force: true });
+    try {
+      await rename(`${finalPath}.bak`, finalPath);
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+  }
+}
+
+export async function discardBackups(files: StoredFile[]): Promise<void> {
+  await Promise.all(
+    files.map((file) => rm(`${insideUploadDir(file.relativePath)}.bak`, { force: true })),
+  );
+}
+
+function isMissingFile(error: unknown) {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 export async function discardPartial(files: StoredFile[]): Promise<void> {

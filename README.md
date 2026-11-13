@@ -28,7 +28,7 @@ Title is required. Note is optional. Back without Save discards the draft. Check
 
 Camera, Gallery, and Document. At most 5 files, 10 MB each. No video.
 
-The bar is Offline, Syncing, Synced, or Out of sync, plus `User` and 8 characters of the installation id (`X-Installation-Id`). An empty first launch does not hit the API.
+The bar is Offline, Syncing, Synced, or Out of sync, plus `User` and 8 characters of the installation id (`X-Installation-Id`). An empty first launch does not hit the API. Opening the app sends a queue that is already waiting, when the network is up.
 
 Online, each save, check, and delete is sent immediately. A failed request stays on the phone, the badge goes to Out of sync, and the sync icon retries the queue. Local edits are not rolled back.
 

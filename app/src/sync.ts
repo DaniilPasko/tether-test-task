@@ -11,6 +11,7 @@ import {
   listOutbox,
   queueDelete,
   readSave,
+  retainSave,
   type SaveSnapshot,
 } from "./todos";
 
@@ -25,9 +26,11 @@ export type SyncSnapshot = {
 let client: AxiosInstance | null = null;
 let database: SQLiteDatabase | null = null;
 let running: Promise<void> | null = null;
+let active = false;
 let again = false;
 let blocked = false;
 let netOnline = true;
+let netKnown = false;
 let manualOnline = true;
 let snapshot: SyncSnapshot = {
   status: "synced",
@@ -52,7 +55,8 @@ export function watchNetwork(db: SQLiteDatabase) {
 export function setManualOnline(on: boolean) {
   if (!netOnline) return;
   manualOnline = on;
-  applyOnline(netOnline && manualOnline);
+  const next = netOnline && manualOnline;
+  applyOnline(next, next && !onlineManager.isOnline());
 }
 
 export function retrySync() {
@@ -82,7 +86,6 @@ export function pushTodoChanges(db: SQLiteDatabase) {
     running = null;
     publish();
   });
-  publish();
 }
 
 async function drain(db: SQLiteDatabase, installationId: string) {
@@ -90,6 +93,9 @@ async function drain(db: SQLiteDatabase, installationId: string) {
     while (again && !blocked && onlineManager.isOnline()) {
       again = false;
       const queue = await listOutbox(db);
+      if (queue.length === 0) continue;
+      active = true;
+      publish();
       for (const entry of queue) {
         if (blocked || !onlineManager.isOnline()) return;
         try {
@@ -104,21 +110,24 @@ async function drain(db: SQLiteDatabase, installationId: string) {
   } catch (error) {
     if (!onlineManager.isOnline() || axios.isCancel(error)) return;
     blocked = true;
+  } finally {
+    active = false;
   }
 }
 
 function setNetConnected(connected: boolean) {
-  const wasConnected = netOnline;
+  const wasConnected = netKnown && netOnline;
+  netKnown = true;
   netOnline = connected;
   if (!connected) manualOnline = false;
   else if (!wasConnected) manualOnline = true;
-  applyOnline(netOnline && manualOnline);
+  const next = netOnline && manualOnline;
+  applyOnline(next, next && !wasConnected);
 }
 
-function applyOnline(next: boolean) {
-  const previous = onlineManager.isOnline();
+function applyOnline(next: boolean, flush: boolean) {
   onlineManager.setOnline(next);
-  if (!previous && next && database) {
+  if (flush && database) {
     blocked = false;
     pushTodoChanges(database);
   }
@@ -144,7 +153,7 @@ function publish() {
 
 function currentStatus(): SyncStatus {
   if (!onlineManager.isOnline()) return "offline";
-  if (running) return "syncing";
+  if (active) return "syncing";
   if (blocked) return "out-of-sync";
   return "synced";
 }
@@ -159,7 +168,10 @@ async function sendEntry(db: SQLiteDatabase, installationId: string, todoId: str
     "SELECT kind FROM outbox WHERE todo_id = ?",
     todoId,
   );
-  if (queued?.kind !== "delete") return;
+  if (queued?.kind !== "delete") {
+    await db.runAsync("DELETE FROM outbox WHERE todo_id = ? AND kind = 'save'", todoId);
+    return;
+  }
   await http().delete(`/todos/${todoId}`, { headers: headers(installationId) });
   await acknowledgeDelete(db, todoId);
 }
@@ -167,7 +179,75 @@ async function sendEntry(db: SQLiteDatabase, installationId: string, todoId: str
 async function sendSave(db: SQLiteDatabase, installationId: string, save: SaveSnapshot) {
   const fields = changedFields(save);
   const files = pendingFiles(save);
-  if (!fields && files.uploads.length === 0 && files.removed.length === 0) return;
+  if (!fields && files.uploads.length === 0 && files.removed.length === 0) {
+    await retainSave(db, save.todo.id);
+    return;
+  }
+  const url = `/todos/${save.todo.id}`;
+  const requestHeaders = headers(installationId);
+  if (save.acked) {
+    try {
+      await http().put(url, saveBody(fields, files), { headers: requestHeaders });
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      await sendCreate(db, url, requestHeaders, save);
+      return;
+    }
+  } else {
+    await http().post(url, saveBody(fields, files), { headers: requestHeaders });
+  }
+  await finishSave(db, url, requestHeaders, save, files);
+}
+
+async function sendCreate(
+  db: SQLiteDatabase,
+  url: string,
+  requestHeaders: Record<string, string>,
+  save: SaveSnapshot,
+) {
+  await http().post(
+    url,
+    saveBody(
+      {
+        title: save.todo.title,
+        note: save.todo.note,
+        completed: save.todo.completed ? "true" : "false",
+        createdAt: save.todo.createdAt,
+      },
+      { uploads: save.attachments, removed: [] },
+    ),
+    { headers: requestHeaders },
+  );
+  await finishSave(db, url, requestHeaders, save, {
+    uploads: save.attachments,
+    removed: save.deletedAttachmentIds,
+  });
+}
+
+async function finishSave(
+  db: SQLiteDatabase,
+  url: string,
+  requestHeaders: Record<string, string>,
+  save: SaveSnapshot,
+  files: { uploads: { id: string }[]; removed: string[] },
+) {
+  const applied = await acknowledgeSave(db, save.todo.id, {
+    title: save.todo.title,
+    note: save.todo.note,
+    completed: save.todo.completed,
+    savedAttachmentIds: files.uploads.map((file) => file.id),
+    removedAttachmentIds: files.removed,
+  });
+  if (applied) return;
+  await queueDelete(db, save.todo.id);
+  await http().delete(url, { headers: requestHeaders });
+  await acknowledgeDelete(db, save.todo.id);
+}
+
+function saveBody(
+  fields: Record<string, string> | null,
+  files: { uploads: SaveSnapshot["attachments"]; removed: string[] },
+) {
   const body = new FormData();
   if (fields) {
     for (const [name, value] of Object.entries(fields)) body.append(name, value);
@@ -180,24 +260,11 @@ async function sendSave(db: SQLiteDatabase, installationId: string, save: SaveSn
     } as unknown as Blob);
   }
   for (const id of files.removed) body.append("deletedAttachmentIds", id);
-  const url = `/todos/${save.todo.id}`;
-  const requestHeaders = headers(installationId);
-  if (save.acked) {
-    await http().put(url, body, { headers: requestHeaders });
-  } else {
-    await http().post(url, body, { headers: requestHeaders });
-  }
-  const applied = await acknowledgeSave(db, save.todo.id, {
-    title: save.todo.title,
-    note: save.todo.note,
-    completed: save.todo.completed,
-    savedAttachmentIds: files.uploads.map((file) => file.id),
-    removedAttachmentIds: files.removed,
-  });
-  if (applied) return;
-  await queueDelete(db, save.todo.id);
-  await http().delete(url, { headers: requestHeaders });
-  await acknowledgeDelete(db, save.todo.id);
+  return body;
+}
+
+function isMissing(error: unknown) {
+  return axios.isAxiosError(error) && error.response?.status === 404;
 }
 
 function pendingFiles(save: SaveSnapshot) {

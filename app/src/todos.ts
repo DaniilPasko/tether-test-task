@@ -308,12 +308,15 @@ export async function acknowledgeDelete(db: SQLiteDatabase, todoId: string) {
   await db.runAsync(`DELETE FROM outbox WHERE todo_id = ? AND kind = 'delete'`, todoId);
 }
 
-async function retainSave(db: SQLiteDatabase, todoId: string) {
+export async function retainSave(db: SQLiteDatabase, todoId: string) {
   const todo = await db.getFirstAsync<TodoRow>(
     `SELECT ${todoSelect} FROM todos WHERE id = ?`,
     todoId,
   );
-  if (!todo) return;
+  if (!todo) {
+    await db.runAsync("DELETE FROM outbox WHERE todo_id = ? AND kind = 'save'", todoId);
+    return;
+  }
   const pending = await db.getFirstAsync<{ total: number }>(
     "SELECT COUNT(*) AS total FROM attachments WHERE todo_id = ? AND acked = 0",
     todoId,

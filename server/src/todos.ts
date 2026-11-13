@@ -6,10 +6,12 @@ import { replaceAttachments, updateAttachments } from "./attachments.js";
 import { pool } from "./db.js";
 import { HttpError } from "./http-error.js";
 import {
+  discardBackups,
   discardPartial,
   publishFiles,
   removeStored,
   removeTodoFiles,
+  restoreFiles,
   writePartial,
   type StoredFile,
 } from "./storage.js";
@@ -42,8 +44,11 @@ export const todoRoutes: FastifyPluginAsync = async (app) => {
     const completed = form.fields.completed ?? false;
 
     let removed: string[] = [];
+    let published = false;
     let committed = false;
     try {
+      await publishFiles(form.files);
+      published = true;
       const status = await withTransaction(async (client) => {
         const owner = await lockTodo(client, id);
         if (!owner) {
@@ -68,12 +73,13 @@ export const todoRoutes: FastifyPluginAsync = async (app) => {
         return 200;
       });
       committed = true;
-      await publishFiles(form.files);
+      await discardBackups(form.files);
       await removeStored(removed);
       return reply.code(status).send();
     } catch (error) {
       if (!committed) {
-        await discardPartial(form.files);
+        if (published) await restoreFiles(form.files);
+        else await discardPartial(form.files);
       }
       throw error;
     }
@@ -90,8 +96,11 @@ export const todoRoutes: FastifyPluginAsync = async (app) => {
     }
 
     let removed: string[] = [];
+    let published = false;
     let committed = false;
     try {
+      await publishFiles(form.files);
+      published = true;
       await withTransaction(async (client) => {
         const owner = await lockTodo(client, id);
         if (owner !== userId) {
@@ -121,12 +130,13 @@ export const todoRoutes: FastifyPluginAsync = async (app) => {
         removed = await updateAttachments(client, id, form.files, form.deletedIds);
       });
       committed = true;
-      await publishFiles(form.files);
+      await discardBackups(form.files);
       await removeStored(removed);
       return reply.code(204).send();
     } catch (error) {
       if (!committed) {
-        await discardPartial(form.files);
+        if (published) await restoreFiles(form.files);
+        else await discardPartial(form.files);
       }
       throw error;
     }
