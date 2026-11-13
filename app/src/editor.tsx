@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native'
 import { pushTodoChanges } from './sync'
+import { SyncBar } from './sync-bar'
 import { colors, stackOptions } from './theme'
 import {
   addAttachment,
@@ -218,8 +219,10 @@ export default function Editor({ todoId }: { todoId?: string }) {
           headerRight: () => <SaveButton disabled={!canSave} onPress={() => void save()} />,
         }}
       />
+      <SyncBar />
       {ready ? (
         <ScrollView
+          style={styles.form}
           contentContainerStyle={styles.content}
           contentInsetAdjustmentBehavior="automatic"
           keyboardShouldPersistTaps="handled"
@@ -346,6 +349,9 @@ function alertError(error: unknown) {
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.background,
+    flex: 1,
+  },
+  form: {
     flex: 1,
   },
   content: {

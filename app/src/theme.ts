@@ -4,6 +4,7 @@ export const colors = {
   secondary: '#6b6b6b',
   line: '#d9d9d9',
   blue: '#007aff',
+  green: '#34c759',
   red: '#ff3b30',
   box: '#8e8e93',
 }

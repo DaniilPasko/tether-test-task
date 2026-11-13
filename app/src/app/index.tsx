@@ -3,6 +3,7 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router'
 import { useSQLiteContext } from 'expo-sqlite'
 import { useCallback, useRef, useState } from 'react'
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { SyncBar } from '../sync-bar'
 import { pushTodoChanges } from '../sync'
 import { colors, stackOptions } from '../theme'
 import { deleteTodo, listTodos, updateTodo, type Todo } from '../todos'
@@ -76,6 +77,7 @@ export default function HomeScreen() {
         data={todos ?? []}
         keyExtractor={(item) => item.id}
         contentInsetAdjustmentBehavior="automatic"
+        ListHeaderComponent={SyncBar}
         contentContainerStyle={todos?.length ? undefined : styles.emptyList}
         renderItem={({ item }) => (
           <TodoRow

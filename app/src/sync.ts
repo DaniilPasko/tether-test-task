@@ -1,3 +1,5 @@
+import NetInfo from '@react-native-community/netinfo'
+import { onlineManager } from '@tanstack/react-query'
 import axios, { type AxiosInstance } from 'axios'
 import Constants from 'expo-constants'
 import type { SQLiteDatabase } from 'expo-sqlite'
@@ -12,39 +14,139 @@ import {
   type SaveSnapshot,
 } from './todos'
 
+export type SyncStatus = 'offline' | 'syncing' | 'synced' | 'out-of-sync'
+
+export type SyncSnapshot = {
+  status: SyncStatus
+  toggleOn: boolean
+  toggleEnabled: boolean
+}
+
 let client: AxiosInstance | null = null
+let database: SQLiteDatabase | null = null
 let running: Promise<void> | null = null
 let again = false
 let blocked = false
+let netOnline = true
+let manualOnline = true
+let snapshot: SyncSnapshot = {
+  status: 'synced',
+  toggleOn: true,
+  toggleEnabled: true,
+}
+const listeners = new Set<() => void>()
+
+export function watchNetwork(db: SQLiteDatabase) {
+  database = db
+  onlineManager.setEventListener(() =>
+    NetInfo.addEventListener((state) => {
+      if (typeof state.isConnected !== 'boolean') return
+      setNetConnected(state.isConnected)
+    }),
+  )
+  return () => {
+    onlineManager.setEventListener(() => undefined)
+  }
+}
+
+export function setManualOnline(on: boolean) {
+  if (!netOnline) return
+  manualOnline = on
+  applyOnline(netOnline && manualOnline)
+}
+
+export function retrySync() {
+  if (!database || !onlineManager.isOnline() || running) return
+  blocked = false
+  pushTodoChanges(database)
+}
+
+export function subscribeSync(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+export function getSyncSnapshot() {
+  return snapshot
+}
 
 export function pushTodoChanges(db: SQLiteDatabase) {
-  if (blocked) return
+  database = db
+  if (!onlineManager.isOnline() || blocked) return
   again = true
   if (running) return
   const installationId = readInstallationId()
   running = drain(db, installationId).finally(() => {
     running = null
+    publish()
   })
+  publish()
 }
 
 async function drain(db: SQLiteDatabase, installationId: string) {
   try {
-    while (again && !blocked) {
+    while (again && !blocked && onlineManager.isOnline()) {
       again = false
       const queue = await listOutbox(db)
       for (const entry of queue) {
-        if (blocked) return
+        if (blocked || !onlineManager.isOnline()) return
         try {
           await sendEntry(db, installationId, entry.todoId)
-        } catch {
+        } catch (error) {
+          if (!onlineManager.isOnline() || axios.isCancel(error)) return
           blocked = true
           return
         }
       }
     }
-  } catch {
+  } catch (error) {
+    if (!onlineManager.isOnline() || axios.isCancel(error)) return
     blocked = true
   }
+}
+
+function setNetConnected(connected: boolean) {
+  const wasConnected = netOnline
+  netOnline = connected
+  if (!connected) manualOnline = false
+  else if (!wasConnected) manualOnline = true
+  applyOnline(netOnline && manualOnline)
+}
+
+function applyOnline(next: boolean) {
+  const previous = onlineManager.isOnline()
+  onlineManager.setOnline(next)
+  if (!previous && next && database) {
+    blocked = false
+    pushTodoChanges(database)
+  }
+  publish()
+}
+
+function publish() {
+  const next: SyncSnapshot = {
+    status: currentStatus(),
+    toggleOn: manualOnline,
+    toggleEnabled: netOnline,
+  }
+  if (
+    snapshot.status === next.status &&
+    snapshot.toggleOn === next.toggleOn &&
+    snapshot.toggleEnabled === next.toggleEnabled
+  ) {
+    return
+  }
+  snapshot = next
+  for (const listener of listeners) listener()
+}
+
+function currentStatus(): SyncStatus {
+  if (!onlineManager.isOnline()) return 'offline'
+  if (running) return 'syncing'
+  if (blocked) return 'out-of-sync'
+  return 'synced'
 }
 
 async function sendEntry(db: SQLiteDatabase, installationId: string, todoId: string) {
@@ -135,6 +237,10 @@ function http() {
     client = axios.create({
       baseURL: `http://${apiHost()}:3000`,
       timeout: 10000,
+    })
+    client.interceptors.request.use((config) => {
+      if (!onlineManager.isOnline()) throw new axios.CanceledError()
+      return config
     })
   }
   return client
