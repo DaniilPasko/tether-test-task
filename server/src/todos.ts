@@ -172,17 +172,17 @@ function readUserId(request: FastifyRequest): string {
 }
 
 function readTodoId(request: FastifyRequest): string {
-  const id = request.params;
+  const params = request.params;
   if (
-    typeof id !== "object" ||
-    id === null ||
-    !("id" in id) ||
-    typeof id.id !== "string" ||
-    !uuidPattern.test(id.id)
+    typeof params !== "object" ||
+    params === null ||
+    !("id" in params) ||
+    typeof params.id !== "string" ||
+    !uuidPattern.test(params.id)
   ) {
     throw new HttpError(400, "Todo id must be a uuid");
   }
-  return id.id.toLowerCase();
+  return params.id.toLowerCase();
 }
 
 async function readForm(

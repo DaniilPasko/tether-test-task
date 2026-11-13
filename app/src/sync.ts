@@ -150,9 +150,9 @@ function currentStatus(): SyncStatus {
 }
 
 async function sendEntry(db: SQLiteDatabase, installationId: string, todoId: string) {
-  const snapshot = await readSave(db, todoId);
-  if (snapshot) {
-    await sendSave(db, installationId, snapshot);
+  const save = await readSave(db, todoId);
+  if (save) {
+    await sendSave(db, installationId, save);
     return;
   }
   const queued = await db.getFirstAsync<{ kind: string }>(
@@ -164,9 +164,9 @@ async function sendEntry(db: SQLiteDatabase, installationId: string, todoId: str
   await acknowledgeDelete(db, todoId);
 }
 
-async function sendSave(db: SQLiteDatabase, installationId: string, snapshot: SaveSnapshot) {
-  const fields = changedFields(snapshot);
-  const files = pendingFiles(snapshot);
+async function sendSave(db: SQLiteDatabase, installationId: string, save: SaveSnapshot) {
+  const fields = changedFields(save);
+  const files = pendingFiles(save);
   if (!fields && files.uploads.length === 0 && files.removed.length === 0) return;
   const body = new FormData();
   if (fields) {
@@ -180,38 +180,38 @@ async function sendSave(db: SQLiteDatabase, installationId: string, snapshot: Sa
     } as unknown as Blob);
   }
   for (const id of files.removed) body.append("deletedAttachmentIds", id);
-  const url = `/todos/${snapshot.todo.id}`;
+  const url = `/todos/${save.todo.id}`;
   const requestHeaders = headers(installationId);
-  if (snapshot.acked) {
+  if (save.acked) {
     await http().put(url, body, { headers: requestHeaders });
   } else {
     await http().post(url, body, { headers: requestHeaders });
   }
-  const applied = await acknowledgeSave(db, snapshot.todo.id, {
-    title: snapshot.todo.title,
-    note: snapshot.todo.note,
-    completed: snapshot.todo.completed,
+  const applied = await acknowledgeSave(db, save.todo.id, {
+    title: save.todo.title,
+    note: save.todo.note,
+    completed: save.todo.completed,
     savedAttachmentIds: files.uploads.map((file) => file.id),
     removedAttachmentIds: files.removed,
   });
   if (applied) return;
-  await queueDelete(db, snapshot.todo.id);
+  await queueDelete(db, save.todo.id);
   await http().delete(url, { headers: requestHeaders });
-  await acknowledgeDelete(db, snapshot.todo.id);
+  await acknowledgeDelete(db, save.todo.id);
 }
 
-function pendingFiles(snapshot: SaveSnapshot) {
-  const removedIds = snapshot.acked ? snapshot.deletedAttachmentIds : [];
+function pendingFiles(save: SaveSnapshot) {
+  const removedIds = save.acked ? save.deletedAttachmentIds : [];
   const removed = new Set(removedIds);
-  const uploads = snapshot.attachments.filter((file) => {
+  const uploads = save.attachments.filter((file) => {
     if (removed.has(file.id)) return false;
-    return snapshot.acked ? !file.acked : true;
+    return save.acked ? !file.acked : true;
   });
   return { uploads, removed: removedIds.filter((id) => !uploads.some((file) => file.id === id)) };
 }
 
-function changedFields(snapshot: SaveSnapshot): Record<string, string> | null {
-  const { todo, acked } = snapshot;
+function changedFields(save: SaveSnapshot): Record<string, string> | null {
+  const { todo, acked } = save;
   if (!acked) {
     return {
       title: todo.title,

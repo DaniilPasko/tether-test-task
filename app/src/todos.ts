@@ -403,13 +403,13 @@ function requireTitle(title: string) {
   return trimmed;
 }
 
-function requireFilename(filename: string) {
+export function requireFilename(filename: string) {
   const name = filename.trim().split(/[/\\]/).pop() ?? "";
   if (!name || name === "." || name === "..") throw new Error("Filename is required");
   return name;
 }
 
-function requireMime(mime: string) {
+export function requireMime(mime: string) {
   const trimmed = mime.trim().toLowerCase();
   if (!trimmed || trimmed.startsWith("video/")) throw new Error("This file type is not accepted");
   return trimmed;

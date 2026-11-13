@@ -18,6 +18,8 @@ import {
   maxFileBytes,
   maxFiles,
   removeAttachment,
+  requireFilename,
+  requireMime,
   updateTodo,
 } from "./todos";
 
@@ -80,19 +82,23 @@ export default function Editor({ todoId }: { todoId?: string }) {
   }, [db, todoId]);
 
   function addFile(file: PickedFile) {
+    let filename: string;
+    let mime: string;
     try {
-      assertAttachment(files.length, file);
+      if (files.length >= maxFiles) throw new Error("Too many files");
+      filename = requireFilename(file.filename);
+      mime = requireMime(file.mime);
+      assertFile(file);
     } catch (error) {
       alertError(error);
       return;
     }
-    const filename = file.filename.trim().split(/[/\\]/).pop() ?? "";
     setFiles((current) => [
       ...current,
       {
         id: randomUUID(),
         filename,
-        mime: file.mime.trim().toLowerCase(),
+        mime,
         localPath: file.localPath,
         persisted: false,
       },
@@ -326,12 +332,7 @@ function AttachButton({
   );
 }
 
-function assertAttachment(count: number, file: PickedFile) {
-  if (count >= maxFiles) throw new Error("Too many files");
-  const filename = file.filename.trim().split(/[/\\]/).pop() ?? "";
-  if (!filename || filename === "." || filename === "..") throw new Error("Filename is required");
-  const mime = file.mime.trim().toLowerCase();
-  if (!mime || mime.startsWith("video/")) throw new Error("This file type is not accepted");
+function assertFile(file: PickedFile) {
   const stored = new File(file.localPath);
   const size = file.size ?? (stored.exists ? stored.size : undefined);
   if (size == null) throw new Error("File is missing");
