@@ -1,3 +1,4 @@
+import { randomUUID } from 'expo-crypto'
 import { Directory, File, Paths } from 'expo-file-system'
 import type { SQLiteDatabase } from 'expo-sqlite'
 
@@ -90,7 +91,7 @@ export async function createTodo(
   const title = requireTitle(input.title)
   const note = (input.note ?? '').trim()
   const todo: Todo = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     title,
     note,
     completed: false,
@@ -163,7 +164,7 @@ export async function addAttachment(
   const mime = requireMime(input.mime)
   const todo = await db.getFirstAsync<{ id: string }>('SELECT id FROM todos WHERE id = ?', todoId)
   if (!todo) throw new Error('Todo not found')
-  const id = crypto.randomUUID()
+  const id = randomUUID()
   const localPath = storeAttachment(todoId, id, input.localPath)
   try {
     await db.withTransactionAsync(async () => {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'expo-crypto'
 import { File, Paths } from 'expo-file-system'
 import { createContext, useContext, useState, type ReactNode } from 'react'
 
@@ -18,7 +19,7 @@ export function readInstallationId(): string {
     }
     installationFile.delete()
   }
-  const id = crypto.randomUUID()
+  const id = randomUUID()
   installationFile.create()
   installationFile.writeSync(id)
   cached = id
