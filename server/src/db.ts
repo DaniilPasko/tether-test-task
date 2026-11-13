@@ -1,4 +1,4 @@
-import { Pool } from 'pg'
-import { config } from './config.js'
+import { Pool } from "pg";
+import { config } from "./config.js";
 
-export const pool = new Pool({ connectionString: config.databaseUrl })
+export const pool = new Pool({ connectionString: config.databaseUrl });

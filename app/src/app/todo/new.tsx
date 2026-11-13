@@ -1,5 +1,5 @@
-import Editor from '../../editor'
+import Editor from "../../editor";
 
 export default function NewTodoScreen() {
-  return <Editor />
+  return <Editor />;
 }

@@ -1,13 +1,13 @@
-import multipart from '@fastify/multipart'
-import Fastify, { type FastifyInstance } from 'fastify'
-import { maxFileBytes, maxFiles } from './limits.js'
-import { todoRoutes } from './todos.js'
+import multipart from "@fastify/multipart";
+import Fastify, { type FastifyInstance } from "fastify";
+import { maxFileBytes, maxFiles } from "./limits.js";
+import { todoRoutes } from "./todos.js";
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({
     logger: true,
     bodyLimit: maxFileBytes * maxFiles + 1024 * 1024,
-  })
+  });
 
   app.register(multipart, {
     throwFileSizeLimit: true,
@@ -15,13 +15,13 @@ export function buildApp(): FastifyInstance {
       fileSize: maxFileBytes,
       files: maxFiles,
     },
-  })
+  });
 
-  app.get('/health', async () => {
-    return { ok: true }
-  })
+  app.get("/health", async () => {
+    return { ok: true };
+  });
 
-  app.register(todoRoutes)
+  app.register(todoRoutes);
 
-  return app
+  return app;
 }

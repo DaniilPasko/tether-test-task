@@ -1,74 +1,75 @@
-import { Ionicons } from '@expo/vector-icons'
-import { Stack, useFocusEffect, useRouter } from 'expo-router'
-import { useSQLiteContext } from 'expo-sqlite'
-import { useCallback, useRef, useState } from 'react'
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SyncBar } from '../sync-bar'
-import { pushTodoChanges } from '../sync'
-import { colors, stackOptions } from '../theme'
-import { deleteTodo, listTodos, updateTodo, type Todo } from '../todos'
+import { Ionicons } from "@expo/vector-icons";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
+import { useCallback, useRef, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { SyncBar } from "../sync-bar";
+import { pushTodoChanges } from "../sync";
+import { colors, stackOptions } from "../theme";
+import { deleteTodo, listTodos, updateTodo, type Todo } from "../todos";
 
 export default function HomeScreen() {
-  const db = useSQLiteContext()
-  const router = useRouter()
-  const [todos, setTodos] = useState<Todo[] | null>(null)
-  const pending = useRef(Promise.resolve())
+  const db = useSQLiteContext();
+  const router = useRouter();
+  const [todos, setTodos] = useState<Todo[] | null>(null);
+  const pending = useRef(Promise.resolve());
 
   const reload = useCallback(async () => {
-    setTodos(await listTodos(db))
-  }, [db])
+    setTodos(await listTodos(db));
+  }, [db]);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true
+      let active = true;
       listTodos(db).then((rows) => {
-        if (active) setTodos(rows)
-      })
+        if (active) setTodos(rows);
+      });
       return () => {
-        active = false
-      }
+        active = false;
+      };
     }, [db]),
-  )
+  );
 
   function run(task: () => Promise<void>) {
-    pending.current = pending.current.then(task, task)
+    pending.current = pending.current.then(task, task);
   }
 
   function open(id: string) {
-    router.push({ pathname: '/todo/[id]', params: { id } })
+    router.push({ pathname: "/todo/[id]", params: { id } });
   }
 
   function toggle(id: string, completed: boolean) {
-    setTodos((current) =>
-      current?.map((todo) => (todo.id === id ? { ...todo, completed } : todo)) ?? current,
-    )
+    setTodos(
+      (current) =>
+        current?.map((todo) => (todo.id === id ? { ...todo, completed } : todo)) ?? current,
+    );
     run(async () => {
       try {
-        await updateTodo(db, id, { completed })
-        pushTodoChanges(db)
+        await updateTodo(db, id, { completed });
+        pushTodoChanges(db);
       } catch {
-        await reload()
+        await reload();
       }
-    })
+    });
   }
 
   function remove(id: string) {
-    setTodos((current) => current?.filter((todo) => todo.id !== id) ?? current)
+    setTodos((current) => current?.filter((todo) => todo.id !== id) ?? current);
     run(async () => {
       try {
-        await deleteTodo(db, id)
-        pushTodoChanges(db)
+        await deleteTodo(db, id);
+        pushTodoChanges(db);
       } catch {
-        await reload()
+        await reload();
       }
-    })
+    });
   }
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <Stack.Screen
         options={{
-          ...stackOptions('Todos'),
+          ...stackOptions("Todos"),
           headerLargeTitleEnabled: true,
           headerRight: () => <AddButton />,
         }}
@@ -92,21 +93,21 @@ export default function HomeScreen() {
         ListEmptyComponent={todos ? EmptyList : undefined}
       />
     </View>
-  )
+  );
 }
 
 function AddButton() {
-  const router = useRouter()
+  const router = useRouter();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Add"
       hitSlop={8}
-      onPress={() => router.push('/todo/new')}
+      onPress={() => router.push("/todo/new")}
     >
       <Text style={styles.add}>Add</Text>
     </Pressable>
-  )
+  );
 }
 
 function TodoRow({
@@ -117,12 +118,12 @@ function TodoRow({
   onToggle,
   onDelete,
 }: {
-  id: string
-  title: string
-  completed: boolean
-  onOpen: (id: string) => void
-  onToggle: (id: string, completed: boolean) => void
-  onDelete: (id: string) => void
+  id: string;
+  title: string;
+  completed: boolean;
+  onOpen: (id: string) => void;
+  onToggle: (id: string, completed: boolean) => void;
+  onDelete: (id: string) => void;
 }) {
   return (
     <View style={[styles.row, { borderBottomColor: colors.line }]}>
@@ -170,7 +171,7 @@ function TodoRow({
         <Ionicons name="trash-outline" size={22} color={colors.red} />
       </Pressable>
     </View>
-  )
+  );
 }
 
 function EmptyList() {
@@ -178,7 +179,7 @@ function EmptyList() {
     <View style={styles.empty}>
       <Text style={{ color: colors.secondary }}>No todos</Text>
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
@@ -189,32 +190,32 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   empty: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingTop: 48,
   },
   add: {
     color: colors.blue,
     fontSize: 17,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   row: {
-    alignItems: 'center',
+    alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 4,
     minHeight: 52,
     paddingLeft: 8,
     paddingRight: 4,
   },
   hit: {
-    alignItems: 'center',
+    alignItems: "center",
     height: 44,
-    justifyContent: 'center',
+    justifyContent: "center",
     width: 44,
   },
   titleHit: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     minHeight: 44,
     paddingVertical: 8,
   },
@@ -222,24 +223,24 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   box: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
+    alignItems: "center",
+    borderCurve: "continuous",
     borderRadius: 6,
     borderWidth: 1.5,
     height: 22,
-    justifyContent: 'center',
+    justifyContent: "center",
     width: 22,
   },
   mark: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
     lineHeight: 16,
   },
   title: {
     fontSize: 17,
   },
   done: {
-    textDecorationLine: 'line-through',
+    textDecorationLine: "line-through",
   },
-})
+});

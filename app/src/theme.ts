@@ -1,13 +1,13 @@
 export const colors = {
-  background: '#ffffff',
-  label: '#000000',
-  secondary: '#6b6b6b',
-  line: '#d9d9d9',
-  blue: '#007aff',
-  green: '#34c759',
-  red: '#ff3b30',
-  box: '#8e8e93',
-}
+  background: "#ffffff",
+  label: "#000000",
+  secondary: "#6b6b6b",
+  line: "#d9d9d9",
+  blue: "#007aff",
+  green: "#34c759",
+  red: "#ff3b30",
+  box: "#8e8e93",
+};
 
 export function stackOptions(title: string) {
   return {
@@ -17,5 +17,5 @@ export function stackOptions(title: string) {
     headerTitleStyle: { color: colors.label },
     headerLargeTitleStyle: { color: colors.label },
     contentStyle: { backgroundColor: colors.background },
-  }
+  };
 }

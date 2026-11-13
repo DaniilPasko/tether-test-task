@@ -1,32 +1,40 @@
-import { Ionicons } from '@expo/vector-icons'
-import { useSyncExternalStore } from 'react'
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
-import { useInstallationId } from './installation'
-import { getSyncSnapshot, retrySync, setManualOnline, subscribeSync, type SyncStatus } from './sync'
-import { colors } from './theme'
+import { Ionicons } from "@expo/vector-icons";
+import { useSyncExternalStore } from "react";
+import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useInstallationId } from "./installation";
+import {
+  getSyncSnapshot,
+  retrySync,
+  setManualOnline,
+  subscribeSync,
+  type SyncStatus,
+} from "./sync";
+import { colors } from "./theme";
 
 const labels: Record<SyncStatus, string> = {
-  offline: 'Offline',
-  syncing: 'Syncing',
-  synced: 'Synced',
-  'out-of-sync': 'Out of sync',
-}
+  offline: "Offline",
+  syncing: "Syncing",
+  synced: "Synced",
+  "out-of-sync": "Out of sync",
+};
 
 const badgeColors: Record<SyncStatus, string> = {
   offline: colors.box,
   syncing: colors.blue,
   synced: colors.green,
-  'out-of-sync': colors.red,
-}
+  "out-of-sync": colors.red,
+};
 
 export function SyncBar() {
-  const id = useInstallationId()
-  const sync = useSyncExternalStore(subscribeSync, getSyncSnapshot)
+  const id = useInstallationId();
+  const sync = useSyncExternalStore(subscribeSync, getSyncSnapshot);
   return (
     <View style={styles.bar}>
-      <Text style={[styles.badge, { backgroundColor: badgeColors[sync.status] }]}>{labels[sync.status]}</Text>
+      <Text style={[styles.badge, { backgroundColor: badgeColors[sync.status] }]}>
+        {labels[sync.status]}
+      </Text>
       <Text style={styles.user}>User {id.slice(0, 8)}</Text>
-      {sync.status === 'out-of-sync' ? (
+      {sync.status === "out-of-sync" ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Sync"
@@ -46,26 +54,26 @@ export function SyncBar() {
         value={sync.toggleOn}
       />
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
   bar: {
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.background,
     borderBottomColor: colors.line,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
   badge: {
     borderRadius: 6,
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 13,
-    fontWeight: '600',
-    overflow: 'hidden',
+    fontWeight: "600",
+    overflow: "hidden",
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
@@ -74,12 +82,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   sync: {
-    alignItems: 'center',
+    alignItems: "center",
     height: 32,
-    justifyContent: 'center',
+    justifyContent: "center",
     width: 32,
   },
   spacer: {
     flex: 1,
   },
-})
+});
