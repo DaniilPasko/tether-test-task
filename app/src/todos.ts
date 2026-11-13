@@ -146,11 +146,7 @@ export async function deleteTodo(db: SQLiteDatabase, id: string) {
       await db.runAsync('DELETE FROM outbox WHERE todo_id = ?', id)
       return
     }
-    await db.runAsync(
-      `INSERT INTO outbox (todo_id, kind, deleted_attachment_ids) VALUES (?, 'delete', '[]')
-       ON CONFLICT (todo_id) DO UPDATE SET kind = 'delete', deleted_attachment_ids = '[]'`,
-      id,
-    )
+    await queueDelete(db, id)
   })
   if (removed) removeAttachmentDirectory(id)
 }
@@ -248,10 +244,24 @@ export async function readSave(db: SQLiteDatabase, todoId: string): Promise<Save
   }
 }
 
-export async function acknowledgeSave(db: SQLiteDatabase, todoId: string, accepted: AcceptedSave) {
+export async function queueDelete(db: SQLiteDatabase, todoId: string) {
+  await db.runAsync(
+    `INSERT INTO outbox (todo_id, kind, deleted_attachment_ids) VALUES (?, 'delete', '[]')
+     ON CONFLICT (todo_id) DO UPDATE SET kind = 'delete', deleted_attachment_ids = '[]'`,
+    todoId,
+  )
+}
+
+export async function acknowledgeSave(
+  db: SQLiteDatabase,
+  todoId: string,
+  accepted: AcceptedSave,
+): Promise<boolean> {
+  let applied = false
   await db.withTransactionAsync(async () => {
     const todo = await db.getFirstAsync<{ id: string }>('SELECT id FROM todos WHERE id = ?', todoId)
     if (!todo) return
+    applied = true
     await db.runAsync(
       'UPDATE todos SET acked_title = ?, acked_note = ?, acked_completed = ? WHERE id = ?',
       accepted.title,
@@ -282,6 +292,7 @@ export async function acknowledgeSave(db: SQLiteDatabase, todoId: string, accept
     }
     await retainSave(db, todoId)
   })
+  return applied
 }
 
 export async function acknowledgeDelete(db: SQLiteDatabase, todoId: string) {

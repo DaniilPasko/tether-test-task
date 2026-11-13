@@ -3,6 +3,7 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router'
 import { useSQLiteContext } from 'expo-sqlite'
 import { useCallback, useRef, useState } from 'react'
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { pushTodoChanges } from '../sync'
 import { colors, stackOptions } from '../theme'
 import { deleteTodo, listTodos, updateTodo, type Todo } from '../todos'
 
@@ -43,6 +44,7 @@ export default function HomeScreen() {
     run(async () => {
       try {
         await updateTodo(db, id, { completed })
+        pushTodoChanges(db)
       } catch {
         await reload()
       }
@@ -54,6 +56,7 @@ export default function HomeScreen() {
     run(async () => {
       try {
         await deleteTodo(db, id)
+        pushTodoChanges(db)
       } catch {
         await reload()
       }

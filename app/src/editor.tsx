@@ -16,6 +16,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { pushTodoChanges } from './sync'
 import { colors, stackOptions } from './theme'
 import {
   addAttachment,
@@ -170,6 +171,7 @@ export default function Editor({ todoId }: { todoId?: string }) {
     if (!title || !ready) return
     savingRef.current = true
     setSaving(true)
+    let written = false
     try {
       let id = recordId
       if (!id) {
@@ -179,6 +181,7 @@ export default function Editor({ todoId }: { todoId?: string }) {
       } else {
         await updateTodo(db, id, { title, note: noteText })
       }
+      written = true
       for (const attachmentId of removed) {
         await removeAttachment(db, attachmentId)
       }
@@ -202,6 +205,8 @@ export default function Editor({ todoId }: { todoId?: string }) {
       alertError(error)
       savingRef.current = false
       setSaving(false)
+    } finally {
+      if (written) pushTodoChanges(db)
     }
   }
 
