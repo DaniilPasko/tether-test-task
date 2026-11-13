@@ -1,9 +1,7 @@
 import multipart from '@fastify/multipart'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { maxFileBytes, maxFiles } from './limits.js'
 import { todoRoutes } from './todos.js'
-
-const maxFileBytes = 10 * 1024 * 1024
-const maxFiles = 5
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({

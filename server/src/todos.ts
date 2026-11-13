@@ -1,7 +1,18 @@
+import { basename } from 'node:path'
+import type { Readable } from 'node:stream'
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify'
 import type { PoolClient } from 'pg'
+import { replaceAttachments, updateAttachments } from './attachments.js'
 import { pool } from './db.js'
 import { HttpError } from './http-error.js'
+import {
+  discardPartial,
+  publishFiles,
+  removeStored,
+  removeTodoFiles,
+  writePartial,
+  type StoredFile,
+} from './storage.js'
 import { touchUser } from './users.js'
 
 const uuidPattern =
@@ -14,81 +25,112 @@ type TodoFields = {
   createdAt?: Date
 }
 
+type TodoForm = {
+  fields: TodoFields
+  files: StoredFile[]
+  deletedIds: string[]
+}
+
 export const todoRoutes: FastifyPluginAsync = async (app) => {
   app.post('/todos/:id', async (request, reply) => {
     const id = readTodoId(request)
     const userId = readUserId(request)
     await touchUser(pool, userId)
-    const fields = await readFields(request)
-    const title = requireTitle(fields.title)
-    const createdAt = requireCreatedAt(fields.createdAt)
-    const note = fields.note ?? ''
-    const completed = fields.completed ?? false
+    const form = await readForm(request, userId, id)
+    const title = requireTitle(form.fields.title)
+    const createdAt = requireCreatedAt(form.fields.createdAt)
+    const note = form.fields.note ?? ''
+    const completed = form.fields.completed ?? false
 
-    const status = await withTransaction(async (client) => {
-      const owner = await lockTodo(client, id)
-      if (!owner) {
+    let removed: string[] = []
+    let committed = false
+    try {
+      const status = await withTransaction(async (client) => {
+        const owner = await lockTodo(client, id)
+        if (!owner) {
+          await client.query(
+            `INSERT INTO todos (id, user_id, title, note, completed, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [id, userId, title, note, completed, createdAt],
+          )
+          removed = await replaceAttachments(client, id, form.files)
+          return 201
+        }
+        if (owner !== userId) {
+          throw new HttpError(404, 'Todo not found')
+        }
         await client.query(
-          `INSERT INTO todos (id, user_id, title, note, completed, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+          `UPDATE todos
+           SET title = $3, note = $4, completed = $5, created_at = $6
+           WHERE id = $1 AND user_id = $2`,
           [id, userId, title, note, completed, createdAt],
         )
-        return 201
+        removed = await replaceAttachments(client, id, form.files)
+        return 200
+      })
+      committed = true
+      await publishFiles(form.files)
+      await removeStored(removed)
+      return reply.code(status).send()
+    } catch (error) {
+      if (!committed) {
+        await discardPartial(form.files)
       }
-      if (owner !== userId) {
-        throw new HttpError(404, 'Todo not found')
-      }
-      await client.query(
-        `UPDATE todos
-         SET title = $3, note = $4, completed = $5, created_at = $6
-         WHERE id = $1 AND user_id = $2`,
-        [id, userId, title, note, completed, createdAt],
-      )
-      return 200
-    })
-
-    return reply.code(status).send()
+      throw error
+    }
   })
 
   app.put('/todos/:id', async (request, reply) => {
     const id = readTodoId(request)
     const userId = readUserId(request)
     await touchUser(pool, userId)
-    const fields = await readFields(request)
-    if (fields.createdAt) {
+    const form = await readForm(request, userId, id)
+    if (form.fields.createdAt) {
+      await discardPartial(form.files)
       throw new HttpError(400, 'CreatedAt cannot be changed')
     }
 
-    await withTransaction(async (client) => {
-      const owner = await lockTodo(client, id)
-      if (owner !== userId) {
-        throw new HttpError(404, 'Todo not found')
-      }
+    let removed: string[] = []
+    let committed = false
+    try {
+      await withTransaction(async (client) => {
+        const owner = await lockTodo(client, id)
+        if (owner !== userId) {
+          throw new HttpError(404, 'Todo not found')
+        }
 
-      const sets: string[] = []
-      const values: unknown[] = [id, userId]
-      if (fields.title !== undefined) {
-        values.push(requireTitle(fields.title))
-        sets.push(`title = $${values.length}`)
+        const sets: string[] = []
+        const values: unknown[] = [id, userId]
+        if (form.fields.title !== undefined) {
+          values.push(requireTitle(form.fields.title))
+          sets.push(`title = $${values.length}`)
+        }
+        if (form.fields.note !== undefined) {
+          values.push(form.fields.note)
+          sets.push(`note = $${values.length}`)
+        }
+        if (form.fields.completed !== undefined) {
+          values.push(form.fields.completed)
+          sets.push(`completed = $${values.length}`)
+        }
+        if (sets.length > 0) {
+          await client.query(
+            `UPDATE todos SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2`,
+            values,
+          )
+        }
+        removed = await updateAttachments(client, id, form.files, form.deletedIds)
+      })
+      committed = true
+      await publishFiles(form.files)
+      await removeStored(removed)
+      return reply.code(204).send()
+    } catch (error) {
+      if (!committed) {
+        await discardPartial(form.files)
       }
-      if (fields.note !== undefined) {
-        values.push(fields.note)
-        sets.push(`note = $${values.length}`)
-      }
-      if (fields.completed !== undefined) {
-        values.push(fields.completed)
-        sets.push(`completed = $${values.length}`)
-      }
-      if (sets.length === 0) {
-        return
-      }
-      await client.query(
-        `UPDATE todos SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2`,
-        values,
-      )
-    })
-
-    return reply.code(204).send()
+      throw error
+    }
   })
 
   app.delete('/todos/:id', async (request, reply) => {
@@ -110,8 +152,16 @@ export const todoRoutes: FastifyPluginAsync = async (app) => {
       }
     })
 
+    await removeTodoFiles(userId, id)
     return reply.code(204).send()
   })
+}
+
+function readUuid(value: string, message: string): string {
+  if (!uuidPattern.test(value)) {
+    throw new HttpError(400, message)
+  }
+  return value.toLowerCase()
 }
 
 function readUserId(request: FastifyRequest): string {
@@ -130,30 +180,86 @@ function readTodoId(request: FastifyRequest): string {
   return id.id.toLowerCase()
 }
 
-async function readFields(request: FastifyRequest): Promise<TodoFields> {
+async function readForm(
+  request: FastifyRequest,
+  userId: string,
+  todoId: string,
+): Promise<TodoForm> {
   if (!request.isMultipart()) {
     throw new HttpError(415, 'Content-Type must be multipart/form-data')
   }
 
   const fields: TodoFields = {}
-  let sawFile = false
+  const files: StoredFile[] = []
+  const deletedIds: string[] = []
 
-  for await (const part of request.parts()) {
-    if (part.type === 'file') {
-      part.file.resume()
-      sawFile = true
-      continue
+  try {
+    for await (const part of request.parts()) {
+      if (part.type === 'file') {
+        files.push(
+          await readFilePart(
+            userId,
+            todoId,
+            part.fieldname,
+            part.filename,
+            part.mimetype,
+            part.file as Readable,
+          ),
+        )
+        continue
+      }
+      if (typeof part.value !== 'string') {
+        throw new HttpError(400, 'Field values must be text')
+      }
+      if (part.fieldname === 'deletedAttachmentIds') {
+        const id = readUuid(part.value, 'Attachment id must be a uuid')
+        if (deletedIds.includes(id)) {
+          throw new HttpError(400, 'Duplicate field')
+        }
+        deletedIds.push(id)
+        continue
+      }
+      assignField(fields, part.fieldname, part.value)
     }
-    if (typeof part.value !== 'string') {
-      throw new HttpError(400, 'Field values must be text')
+    for (const file of files) {
+      if (deletedIds.includes(file.id)) {
+        throw new HttpError(400, 'Attachment cannot be saved and deleted')
+      }
     }
-    assignField(fields, part.fieldname, part.value)
+    return { fields, files, deletedIds }
+  } catch (error) {
+    await discardPartial(files)
+    throw error
   }
+}
 
-  if (sawFile) {
-    throw new HttpError(400, 'Files are not accepted')
+async function readFilePart(
+  userId: string,
+  todoId: string,
+  fieldname: string,
+  rawFilename: string,
+  mime: string,
+  body: Readable,
+): Promise<StoredFile> {
+  if (!uuidPattern.test(fieldname)) {
+    body.resume()
+    throw new HttpError(400, 'Attachment id must be a uuid')
   }
-  return fields
+  const filename = basename(rawFilename).trim()
+  if (!filename || filename === '.' || filename === '..') {
+    body.resume()
+    throw new HttpError(400, 'Filename is required')
+  }
+  if (!mime || mime.startsWith('video/')) {
+    body.resume()
+    throw new HttpError(400, 'This file type is not accepted')
+  }
+  return writePartial(userId, todoId, {
+    id: fieldname.toLowerCase(),
+    filename,
+    mime,
+    body,
+  })
 }
 
 function assignField(fields: TodoFields, name: string, value: string): void {
