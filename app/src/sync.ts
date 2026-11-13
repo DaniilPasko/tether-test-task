@@ -64,9 +64,20 @@ async function sendEntry(db: SQLiteDatabase, installationId: string, todoId: str
 
 async function sendSave(db: SQLiteDatabase, installationId: string, snapshot: SaveSnapshot) {
   const fields = changedFields(snapshot)
-  if (!fields) return
+  const files = pendingFiles(snapshot)
+  if (!fields && files.uploads.length === 0 && files.removed.length === 0) return
   const body = new FormData()
-  for (const [name, value] of Object.entries(fields)) body.append(name, value)
+  if (fields) {
+    for (const [name, value] of Object.entries(fields)) body.append(name, value)
+  }
+  for (const file of files.uploads) {
+    body.append(file.id, {
+      uri: file.localPath,
+      name: file.filename,
+      type: file.mime,
+    } as unknown as Blob)
+  }
+  for (const id of files.removed) body.append('deletedAttachmentIds', id)
   const url = `/todos/${snapshot.todo.id}`
   const requestHeaders = headers(installationId)
   if (snapshot.acked) {
@@ -78,13 +89,23 @@ async function sendSave(db: SQLiteDatabase, installationId: string, snapshot: Sa
     title: snapshot.todo.title,
     note: snapshot.todo.note,
     completed: snapshot.todo.completed,
-    savedAttachmentIds: [],
-    removedAttachmentIds: [],
+    savedAttachmentIds: files.uploads.map((file) => file.id),
+    removedAttachmentIds: files.removed,
   })
   if (applied) return
   await queueDelete(db, snapshot.todo.id)
   await http().delete(url, { headers: requestHeaders })
   await acknowledgeDelete(db, snapshot.todo.id)
+}
+
+function pendingFiles(snapshot: SaveSnapshot) {
+  const removedIds = snapshot.acked ? snapshot.deletedAttachmentIds : []
+  const removed = new Set(removedIds)
+  const uploads = snapshot.attachments.filter((file) => {
+    if (removed.has(file.id)) return false
+    return snapshot.acked ? !file.acked : true
+  })
+  return { uploads, removed: removedIds.filter((id) => !uploads.some((file) => file.id === id)) }
 }
 
 function changedFields(snapshot: SaveSnapshot): Record<string, string> | null {
