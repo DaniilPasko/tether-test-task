@@ -12,6 +12,7 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /srv/dist ./dist
+COPY migrations ./migrations
 RUN mkdir -p /data/uploads && chown -R node:node /srv /data/uploads
 USER node
 EXPOSE 3000
